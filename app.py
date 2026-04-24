@@ -5,11 +5,22 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 import plotly.express as px
+import google.generativeai as genai
+import os
 
 st.set_page_config(page_title="FairGuard AI", page_icon="🛡️", layout="wide")
 st.title("🛡️ FairGuard AI")
 st.subheader("Real-time Bias Detector & Fairness Guardian")
-st.markdown("**Hackathon Working Prototype** — Detects bias instantly")
+st.markdown("**Google Solution Challenge 2026** — Powered by Gemini 1.5 Flash")
+
+# ====================== CONFIGURE GEMINI ======================
+gemini_ready = False
+try:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    gemini_ready = True
+except Exception as e:
+    st.sidebar.error("⚠️ Gemini not configured. Add GEMINI_API_KEY in Streamlit Secrets")
 
 # ====================== SYNTHETIC DATA (with built-in bias) ======================
 def generate_synthetic_data(n=2000):
@@ -60,6 +71,33 @@ def calculate_fairness_metrics(df, protected_attr, target_col='loan_approved', p
     
     return metrics
 
+# ====================== GEMINI BIAS EXPLANATION ======================
+def get_gemini_explanation(metrics, protected_attr, di_score):
+    if not gemini_ready:
+        return "Gemini API not configured. Add GEMINI_API_KEY to Streamlit Secrets."
+    
+    prompt = f"""
+    You are FairGuard, an AI ethics auditor for Google Solution Challenge 2026.
+    
+    Context: A machine learning model for loan approval was audited for bias.
+    Protected attribute analyzed: {protected_attr}
+    Disparate Impact Score: {di_score} (80% rule: <0.8 = biased)
+    Group metrics: {metrics}
+    
+    Task: Give a 3-point executive summary for a hackathon judge:
+    1. Verdict: Is this model biased? Why in 1 sentence.
+    2. Root Cause: Which group is disadvantaged and likely reason?
+    3. Fix: One concrete technical step to mitigate this bias.
+    
+    Keep it under 80 words, non-technical, and impactful.
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Gemini Error: {str(e)}"
+
 # ====================== MAIN APP ======================
 # Option 1: Synthetic data
 if st.button("🚀 Generate Synthetic Biased Dataset (Loan Approval)", type="primary"):
@@ -92,14 +130,14 @@ if 'data' in st.session_state:
             # Prepare data
             X = df.drop(columns=[target])
             y = df[target]
-            X = pd.get_dummies(X, drop_first=True)  # handle categorical
+            X = pd.get_dummies(X, drop_first=True) # handle categorical
             
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
             
             # Train model
-            model = RandomForestClassifier(n_estimators=100, random_state=42)
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
+            model_rf = RandomForestClassifier(n_estimators=100, random_state=42)
+            model_rf.fit(X_train, y_train)
+            y_pred = model_rf.predict(X_test)
             
             # Overall accuracy
             acc = accuracy_score(y_test, y_pred)
@@ -129,12 +167,14 @@ if 'data' in st.session_state:
                          title="Approval Rate by Group", color=list(viz_data.keys()))
             st.plotly_chart(fig, use_container_width=True)
             
-            if 'Disparate Impact' in metrics:
-                di = metrics['Disparate Impact']
-                st.metric("Disparate Impact Ratio", di, 
-                         "✅ Passes 80% rule" if di >= 0.8 else "❌ Bias Detected")
+            di = metrics.get('Disparate Impact', 0)
+            st.metric("Disparate Impact Ratio", di, 
+                     "✅ Passes 80% rule" if di >= 0.8 else "❌ Bias Detected")
             
-            st.success("✅ **Working prototype complete!** You just built a real bias detection system.")
-            st.caption("In a real hackathon I would now add: SHAP explanations, one-click mitigation, PDF report, and 'Bias Bounty' mode.")
-
-st.caption("FairGuard AI • Built live for the hackathon • Copy-paste → Run → Win")
+            # ====================== GEMINI EXPLANATION ======================
+            st.subheader("🤖 AI Ethics Analysis by Gemini 1.5 Flash")
+            with st.spinner("Gemini is generating bias explanation..."):
+                explanation = get_gemini_explanation(metrics, protected, di)
+                st.info(explanation)
+            
+            st.success
